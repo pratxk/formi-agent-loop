@@ -28,6 +28,20 @@ CREATE TABLE IF NOT EXISTS leads(
   lead_id TEXT PRIMARY KEY, workflow TEXT, person_id TEXT, lang TEXT, city_tier TEXT, age_band TEXT, value_band TEXT);
 -- Low-volume world events (config changes, approval decisions, campaigns).
 CREATE TABLE IF NOT EXISTS sim_events(event_id INTEGER PRIMARY KEY, type TEXT, workflow TEXT, ts TEXT, body TEXT);
+
+-- Governance: every proposal and every transition. States: QUEUED SUBMITTING SUBMITTED APPROVED APPLYING APPLIED
+-- REJECTED EXPIRED LAPSED STALE SUPERSEDED.
+CREATE TABLE IF NOT EXISTS proposals(
+  proposal_id TEXT PRIMARY KEY, workflow TEXT, kind TEXT, state TEXT, base_version INT, priority INT,
+  config TEXT, dims TEXT, summary TEXT, diff TEXT, affected_leads INT, dry_run TEXT, impact REAL, rationale TEXT,
+  evidence TEXT, via TEXT, approval_id TEXT, created_ts TEXT, submitted_ts TEXT, decided_ts TEXT, apply_by TEXT,
+  applied_ts TEXT, applied_version INT, reasons TEXT, replaces TEXT);
+CREATE INDEX IF NOT EXISTS ix_prop_wf ON proposals(workflow, state);
+CREATE TABLE IF NOT EXISTS proposal_log(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, proposal_id TEXT,
+  from_state TEXT, to_state TEXT, note TEXT);
+-- The "why": inputs, thresholds and outcome of each planner decision, linked to the proposal it produced.
+CREATE TABLE IF NOT EXISTS decisions(id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT, workflow TEXT, kind TEXT,
+  inputs TEXT, outcome TEXT, proposal_id TEXT);
 CREATE TABLE IF NOT EXISTS loop_metrics(ts TEXT, sim_ts TEXT, events INT, ingest_s REAL, tick_s REAL, lag_events INT);
 """
 

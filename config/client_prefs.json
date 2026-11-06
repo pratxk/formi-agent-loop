@@ -1,0 +1,4 @@
+{
+  "_comment": "Human-supplied client preferences (from stakeholder memos), stricter than sim policy. Keyed by tenant_id. Optional keys: earliest_hour, max_per_24h.",
+  "kestrel_finance": {"earliest_hour": 11, "max_per_24h": 2}
+}
