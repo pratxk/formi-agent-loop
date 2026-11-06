@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Replace this with your controller. Contract: ./run.sh <SIM_URL> runs until the scenario finishes.
+# Contract: ./run.sh <SIM_URL> runs until the scenario finishes. Needs Python 3.10+ and requirements.txt installed
+# (no Docker needed). State lives in state/controller.db (SQLite).
 set -euo pipefail
 SIM_URL="${1:?usage: ./run.sh <SIM_URL>}"
-echo "No controller yet — running the naive example against $SIM_URL" >&2
-exec python examples/naive_controller.py --url "$SIM_URL"
+cd "$(dirname "$0")"
+exec python -m controller --url "$SIM_URL"
