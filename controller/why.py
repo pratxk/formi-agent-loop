@@ -55,10 +55,34 @@ def why(db: sqlite3.Connection, wf: str, ts: str) -> str:
     return "\n".join(out)
 
 
+def why_customer(db: sqlite3.Connection, key: str) -> str:
+    """What did this customer (lead_id or person_id) hear, and why was that variant live? (compliance: 24h answer)"""
+    db.row_factory = sqlite3.Row
+    calls = db.execute("SELECT * FROM call_audit WHERE lead_id=? OR person_id=? ORDER BY ts", (key, key)).fetchall()
+    if not calls:
+        return f"No calls recorded for {key}."
+    out = [f"{len(calls)} call(s) for {key}"]
+    for c in calls:
+        ev = db.execute("SELECT body FROM sim_events WHERE type='config_changed' AND workflow=? AND body LIKE ? ",
+                        (c["workflow"], f'%"version":{c["version"]},%')).fetchone()
+        reason = "initial config (nothing of ours had changed it yet)"
+        if ev:
+            b = json.loads(ev["body"])
+            pr = db.execute("SELECT summary, rationale, via FROM proposals WHERE proposal_id=? OR approval_id=?",
+                            (b.get("proposal_id"), b.get("approval_id"))).fetchone()
+            reason = (f"config v{c['version']} set by {b['actor']}: " + (f"{pr['summary']} ({pr['via']}) because {pr['rationale']}"
+                      if pr else "supervisor edit, not ours" if b["actor"] == "supervisor" else "no record"))
+        out.append(f"  {c['ts']}  cohort={c['cohort']} welcome={c['welcome']} voice={c['voice']} caller_id={c['caller_id']} "
+                   f"prompt={c['prompt']} connected={bool(c['connected'])} engaged={bool(c['engaged'])}\n      why live: {reason}")
+    return "\n".join(out)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
-    ap.add_argument("workflow")
-    ap.add_argument("ts")
+    ap.add_argument("workflow", nargs="?")
+    ap.add_argument("ts", nargs="?")
+    ap.add_argument("--customer", help="lead_id or person_id: what did they hear and why")
     ap.add_argument("--db", default="state/controller.db")
     a = ap.parse_args()
-    print(why(sqlite3.connect(a.db), a.workflow, a.ts))
+    conn = sqlite3.connect(a.db)
+    print(why_customer(conn, a.customer) if a.customer else why(conn, a.workflow, a.ts))
