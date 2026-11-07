@@ -146,3 +146,15 @@ KPI, with interval). Dry runs are estimates and labelled as such.
 5. Incident loop (public_02).
 6. Load test, crash-recovery script, supervisor view, observability.
 7. SUBMISSION.md.
+
+## 12. What changed after building (kept so the reasoning is visible)
+
+- Experiments are per cohort (not one cohort per workflow): voice effects differ by age band, so a pooled test hides them.
+  Alpha became 0.10 *per workflow*, split across tests and looks; 0.05 per test would give ~3 false winners per workflow.
+- No welcome × voice interaction test (sample cost); marginal effects only. Disclosed in SUBMISSION §13.
+- Decay uses a pooled check over cohorts and only the last 3 days; per-cohort holdouts are too thin.
+- Governance learned two things from public_02: auto changes must wait while an approval is pending (version bump makes it
+  stale), and a supervisor edit means *that dimension is owned by the human* afterwards.
+- Caller-ID comparison is stratified by (day, hour) cell; raw window totals blamed a healthy ID for having been used at bad hours.
+- Restart does not re-plan a simulated minute that was already planned (`planned_minute`); found by the crash-point script.
+- Incident verification judges only calls made after the fix and fails on engagement only when confident (one-sided 95%).

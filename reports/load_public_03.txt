@@ -1,0 +1,6 @@
+public_03_load, caffeinate, single process, uncontended laptop
+      271.92 real        82.17 user        40.11 sys
+          1120239616  maximum resident set size
+          1734903440  peak memory footprint
+ticks=480 ingest_s=200.2 tick_s=237.7 live_events=4200135 avg_tick_s=0.5 max_tick_s=3.3
+-rw-r--r--@ 1 kgen  staff  916566016  7 Nov 22:46 state/controller.db

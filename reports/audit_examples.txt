@@ -1,0 +1,58 @@
+$ python -m controller.why ks_cancel 2027-01-07T14:30:00+05:30
+ks_cancel -> config v7 at 2027-01-07T14:30:00+05:30 by controller_approved; dims=['prompt_version']
+  Why: Safety fix: replace prompt P2 with P1 (hallucination flags 4.6% vs 1.6% on other prompts)
+  Rationale: Automated QA flags 4.6% of connected calls under P2 vs 1.6% under other prompts (z=3.18, n=194). P1 passed validation at 98.5% and has been observed in production with engagement 49.1%. Near-verbatim scripts were excluded. This replaces a supervisor edit, so it needs approval; nothing is applied silently.
+  Impact score 1.00, affected leads 1500, route=approval, kind=incident_fix
+  Evidence: {"validation_run_id":"val_00001"}
+  Decision inputs @ 2027-01-07T13:30:00+05:30: {"detect":{"n":194,"rate":0.04639175257731959,"ref_n":3610,"ref_rate":0.015789473684210527,"z":3.18},"excluded_verbatim":["P5"],"tried":[],"validations":{"P1":{"pass_rate":0.985,"run":"val_00001"},"P3":{"pass_rate":0.99,"run":"val_00002"},"P4":{"pass_rate":0.975,"run":"val_00003"}}}
+  Lifecycle:
+    2027-01-07T13:30:00+05:30  - -> QUEUED  via=approval dims=['prompt_version']
+    2027-01-07T13:30:00+05:30  QUEUED -> SUBMITTING  POST /approvals
+    2027-01-07T13:30:00+05:30  SUBMITTING -> SUBMITTED  pending approver
+    2027-01-07T14:30:00+05:30  SUBMITTED -> APPROVED  approver said yes
+    2027-01-07T14:30:00+05:30  APPROVED -> APPLYING  apply
+    2027-01-07T14:30:00+05:30  APPLYING -> APPLIED  applied
+  Approver decision: approval apr_00007, reasons=None
+  Before (v6): 1200 dials, pickup 23.6%, engagement 52.3% (of 283 connected)
+  After  (v7): 200 dials, pickup 28.0%, engagement 50.0% (of 56 connected)
+  Next change: v8 at 2027-01-07T15:00:00+05:30 by controller_auto dims=['caller_id']
+
+$ python -m controller.why --customer ks_cancel:l00026691
+4 call(s) for ks_cancel:l00026691
+  2027-01-07T11:08:00+05:30  cohort=age_band_46_60 welcome=W3 voice=V1 caller_id=D2 prompt=P1 connected=False engaged=False
+      why live: config v5 set by controller_auto: Rotate calls away from caller ID D2 (pickup collapsed vs siblings) (auto) because Over the last 24h ['D2'] picked up far below siblings (z<-3.5, <80% of siblings' rate).
+  2027-01-07T16:39:00+05:30  cohort=age_band_46_60 welcome=W3 voice=V4 caller_id=D1 prompt=P1 connected=False engaged=False
+      why live: config v9 set by controller_auto: Rotate calls away from caller ID D2 (pickup collapsed vs siblings) (auto) because Over the last 24h ['D2'] picked up far below siblings (z<-3.5, <80% of siblings' rate).
+  2027-01-08T14:04:00+05:30  cohort=age_band_46_60 welcome=W1 voice=V3 caller_id=D3 prompt=P1 connected=True engaged=False
+      why live: config v10 set by controller_auto: Rotate calls away from caller ID D2 (pickup collapsed vs siblings) (auto) because Over the last 24h ['D2'] picked up far below siblings (z<-3.5, <80% of siblings' rate).
+  2027-01-08T16:42:00+05:30  cohort=age_band_46_60 welcome=W2 voice=V3 caller_id=D3 prompt=P1 connected=False engaged=False
+      why live: config v10 set by controller_auto: Rotate calls away from caller ID D2 (pickup collapsed vs siblings) (auto) because Over the last 24h ['D2'] picked up far below siblings (z<-3.5, <80% of siblings' rate).
+
+$ python -m controller.view
+As of 2027-01-14T00:00:00+05:30
+
+== ks_cancel
+Being tested:
+  default/welcome_message: explore
+  default/voice: explore
+Needs you: nothing
+Changed in last 24h: nothing
+Incident: resolved on prompt P2
+
+== nw_kyc
+Being tested: nothing
+Needs you: nothing
+Changed in last 24h: nothing
+
+== nw_renewal
+Being tested: nothing
+Needs you: nothing
+Changed in last 24h: nothing
+
+Loop health: 960 ticks, avg 0.02s (max 0.07s), 137052 events, 19 decisions logged, credits 191.0
+
+$ python -m controller.view --weekly nw_
+2027-01-04T12:30  nw_renewal v2 [controller_approved] ['cohorts', 'schedule']: Call people in the hours they pick up: hour weights for age_band_18_30, age_band_31_45, age_band_46_60, age_band_60plus -- History shows pickup depends
+2027-01-04T16:45  nw_renewal v3 [controller_approved] ['welcome_message', 'voice']: Start welcome/voice experiments: default/welcome_message: start exploring welcome_message: W1 is champion, no history exists for the alternatives;
+2027-01-05T17:30  nw_kyc v2 [controller_approved] ['cohorts', 'schedule']: Call people in the hours they pick up: hour weights for age_band_18_30, age_band_31_45, age_band_46_60, age_band_60plus -- History shows pickup depends on 
+2027-01-10T13:30  nw_renewal v5 [controller_approved] ['voice']: Make your voice edit apply to every cohort (remove 4 experiment overrides) -- A supervisor changed the default allocation. Our per-cohort experiment overrides would 

@@ -1,0 +1,13 @@
+# scripts_crash_test.sh (public_01, 3x kill -9 at random times)
+kill #1 at sim_minute=780
+kill #2 at sim_minute=2535
+kill #3 at sim_minute=4080
+reference : 83200|20923|11243 83200|20923|11243 392 experiment:APPLIED:4,experiment:QUEUED:1,experiment:REJECTED:1,schedule_cohorts:APPLIED:3 v3 v2 v5 
+after kills: 83200|20923|11243 83200|20923|11243 392 experiment:APPLIED:4,experiment:QUEUED:1,experiment:REJECTED:1,schedule_cohorts:APPLIED:3 v3 v2 v5 
+PASS: identical
+
+# scripts_crash_points.sh (public_02, one self-kill at each of 3 instants)
+reference: batch:APPLIED:1,callerid_health:APPLIED:6,callerid_health:SUPERSEDED:1,experiment:APPLIED:2,experiment_reset:APPLIED:1,incident_fix:APPLIED:1,schedule_cohorts:APPLIED:3,schedule_cohorts:REJECTED:2 26190 v5 v2 v10 
+PASS after_submit (died with exit 137, recovered): identical
+PASS after_apply (died with exit 137, recovered): identical
+PASS after_auto_put (died with exit 137, recovered): identical
