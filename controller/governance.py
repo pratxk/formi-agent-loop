@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import logging
 import sqlite3
 from dataclasses import dataclass
@@ -57,6 +58,15 @@ def load_prefs(path: str = "config/client_prefs.json") -> dict[str, dict]:
 
 def _j(x: Any) -> str:
     return json.dumps(x, sort_keys=True, separators=(",", ":"))
+
+
+def _crash_point(label: str) -> None:
+    """Test hook (off unless CONTROLLER_CRASH=<label> and CONTROLLER_CRASH_MARK=<file>): die once, hard, right after a
+    side effect reached the simulator and before we recorded it. Proves the recovery path, not just the happy path."""
+    mark = os.environ.get("CONTROLLER_CRASH_MARK")
+    if mark and os.environ.get("CONTROLLER_CRASH") == label and not os.path.exists(mark):
+        open(mark, "w").close()
+        os._exit(137)
 
 
 class Governance:
@@ -142,7 +152,8 @@ class Governance:
         for wf in self.pol:
             cur = self.sim.get(f"/workflows/{wf}/config")
             self._expire_stale(wf, cur["version"], now)
-            self._release_auto(wf, cur, now)
+            if self._release_auto(wf, cur, now):
+                cur = self.sim.get(f"/workflows/{wf}/config")  # version moved: approvals must be based on the new one
             self._release_approvals(wf, cur, now)
 
     # ---------- crash recovery ----------
@@ -191,6 +202,7 @@ class Governance:
         pid = r["proposal_id"]
         self._set(pid, "APPLYING", now, "apply")
         status, body = self.sim.call("POST", f"/workflows/{r['workflow']}/apply", json={"approval_id": r["approval_id"]})
+        _crash_point("after_apply")
         if status == 200:
             self._set(pid, "APPLIED", now, "applied", applied_ts=self._ts(now), applied_version=body.get("version"))
         elif status == 410:
@@ -207,16 +219,26 @@ class Governance:
             if r["base_version"] < version:
                 self._set(r["proposal_id"], "SUPERSEDED", now, f"base v{r['base_version']} < current v{version}")
 
-    def _release_auto(self, wf: str, cur: dict, now: datetime) -> None:
+    def _release_auto(self, wf: str, cur: dict, now: datetime) -> bool:
+        """Apply queued auto changes. While an approval is waiting for a decision, hold non-rollback auto changes:
+        any version bump would make the approval stale (409) and cost another approver round trip."""
+        applied = False
+        waiting = self.db.execute("SELECT 1 FROM proposals WHERE workflow=? AND via='approval' AND state IN "
+                                  "('SUBMITTING','SUBMITTED')", (wf,)).fetchone()
         for r in self.db.execute("SELECT * FROM proposals WHERE workflow=? AND state='QUEUED' AND via='auto'",
                                  (wf,)).fetchall():
+            if waiting and r["kind"] != "rollback":
+                continue
             self._set(r["proposal_id"], "APPLYING", now, "auto-apply")
             status, body = self.sim.call("PUT", f"/workflows/{wf}/config", json={
                 "proposal_id": r["proposal_id"], "base_version": r["base_version"],
                 "proposed_config": json.loads(r["config"]), "rationale": r["rationale"]})
+            _crash_point("after_auto_put")
             if status == 200:
                 self._set(r["proposal_id"], "APPLIED", now, "auto-applied", applied_ts=self._ts(now),
                           applied_version=body.get("version"))
+                applied = True
+                break  # one change per tick: later queued ones were based on the old version
             elif status == 403:  # our pre-check disagreed with the sim: fall back to the approval path
                 self.db.execute("UPDATE proposals SET via='approval' WHERE proposal_id=?", (r["proposal_id"],))
                 self._set(r["proposal_id"], "QUEUED", now, f"auto refused {body}; using approval path")
@@ -224,6 +246,7 @@ class Governance:
                 self._set(r["proposal_id"], "SUPERSEDED", now, f"auto-apply conflict {body}")
             else:
                 self._set(r["proposal_id"], "QUEUED", now, f"auto-apply retry: {status}")
+        return applied
 
     def _can_submit_now(self, pol: Policy, now: datetime) -> bool:
         s, e = pol.hours
@@ -300,6 +323,7 @@ class Governance:
             "change_summary": r["summary"], "diff": json.loads(r["diff"]), "affected_leads": r["affected_leads"],
             "dry_run": json.loads(r["dry_run"]), "impact_score": r["impact"], "rationale": r["rationale"],
             **({"evidence": batch["evidence"]} if batch["evidence"] else {})})
+        _crash_point("after_submit")
         if status == 200:
             self._set(pid, "SUBMITTED", now, "pending approver", approval_id=body["approval_id"], submitted_ts=self._ts(now))
         elif status == 409 and body.get("error") == "duplicate_proposal_id":

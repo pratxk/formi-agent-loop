@@ -42,7 +42,8 @@ def main() -> None:
     gov = Governance(db, sim, policies, load_prefs())
     now = datetime.fromisoformat(st["ts"])
     gov.tick(now)  # reconcile anything in flight before the crash
-    planners.run(db, sim, gov, wfs, policies, now)
+    if meta_get(db, "planned_minute") != str(st["sim_minute"]):  # planners already ran for this tick before the crash?
+        planners.run(db, sim, gov, wfs, policies, now)
     while True:
         t0 = time.time()
         status, body = sim.call("POST", "/sim/advance", json={"minutes": TICK_MIN}, retry=False)
@@ -58,8 +59,10 @@ def main() -> None:
         n = ing.ingest_all()
         now = datetime.fromisoformat(body["ts"])
         planners.run(db, sim, gov, wfs, policies, now)
+        meta_set(db, "planned_minute", str(body["sim_minute"]))
         gov.tick(now)
         meta_set(db, "sim_minute", str(body["sim_minute"]))
+        meta_set(db, "credits", str(sim.get("/sim/state")["credits_remaining"]))
         db.execute("INSERT INTO loop_metrics VALUES(?,?,?,?,?,?)",
                    (time.strftime("%H:%M:%S"), body["ts"], n, time.time() - t1, time.time() - t0, 0))
 

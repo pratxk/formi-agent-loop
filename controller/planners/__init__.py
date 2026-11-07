@@ -8,7 +8,7 @@ from datetime import datetime
 
 from ..api import Sim
 from ..governance import Governance, Policy
-from . import callerid, calltime
+from . import callerid, calltime, experiments, incidents
 
 log = logging.getLogger("controller.plan")
 
@@ -16,5 +16,5 @@ log = logging.getLogger("controller.plan")
 def run(db: sqlite3.Connection, sim: Sim, gov: Governance, wfs: dict[str, dict], pols: dict[str, Policy], now: datetime) -> None:
     for wid, wf in wfs.items():
         cur = sim.get(f"/workflows/{wid}/config")
-        for planner in (calltime, callerid):
+        for planner in (calltime, callerid, incidents, experiments):
             planner.plan(db, gov, wf, pols[wid], cur, now)
