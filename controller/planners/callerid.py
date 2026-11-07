@@ -15,15 +15,41 @@ from ..ingest import D0
 
 KIND = "callerid_health"
 WINDOW_H, MIN_DIALS = 24, 200
-Z_BAD, REL_BAD, Z_OK = -3.5, 0.80, -1.5   # flag if z<-3.5 AND rate<80% of siblings; clear when z>-1.5
+RECENT_H = 6
+Z_BAD, REL_BAD, Z_OK = -3.5, 0.80, -1.5   # flag if z<-3.5 (24h) AND pickup<80% of expected over the last 6h; clear when z>-1.5
 FLOOR, SPARE_PROBE = 0.05, 0.10
 
 
-def _window(db: sqlite3.Connection, wid: str, now: datetime) -> dict[str, tuple[int, int]]:
+def _cells(db: sqlite3.Connection, wid: str, now: datetime) -> dict[tuple[int, int], dict[str, tuple[int, int]]]:
+    """(day, hour) -> caller_id -> (dials, connected) over the window. Cells keep pickup comparisons honest: allocation
+    changes during the window, and pickup also depends on hour and day, so comparing raw window totals would blame
+    an ID for simply having been used at bad hours."""
     idx = (now.date() - D0).days * 24 + now.hour
-    return {r[0]: (r[1], r[2]) for r in db.execute(
-        "SELECT caller_id, SUM(dials), SUM(connected) FROM call_agg WHERE workflow=? AND day*24+hour>? GROUP BY 1",
-        (wid, idx - WINDOW_H))}
+    out: dict[tuple[int, int], dict[str, tuple[int, int]]] = {}
+    for d, h, cid, n, c in db.execute(
+            "SELECT day, hour, caller_id, SUM(dials), SUM(connected) FROM call_agg WHERE workflow=? AND day*24+hour>? "
+            "GROUP BY 1,2,3", (wid, idx - WINDOW_H)):
+        out.setdefault((d, h), {})[cid] = (n, c)
+    return out
+
+
+def stratified(cells: dict, i: str, rest: set[str]) -> tuple[float, float, int, int]:
+    """Cochran-Mantel-Haenszel style: z and observed/expected pickup of ID i vs the other active IDs, within cells."""
+    o = e = v = 0.0
+    n_i = n_r = 0
+    for per in cells.values():
+        ni, ci = per.get(i, (0, 0))
+        nr = sum(per.get(j, (0, 0))[0] for j in rest)
+        cr = sum(per.get(j, (0, 0))[1] for j in rest)
+        n_i, n_r = n_i + ni, n_r + nr
+        big_n, big_c = ni + nr, ci + cr
+        if ni == 0 or nr == 0 or big_n < 2:
+            continue
+        o += ci
+        e += ni * big_c / big_n
+        v += ni * nr * big_c * (big_n - big_c) / (big_n * big_n * (big_n - 1))
+    z = (o - e) / v ** 0.5 if v > 0 else 0.0
+    return z, (o / e if e > 0 else 1.0), n_i, n_r
 
 
 def plan(db: sqlite3.Connection, gov: Governance, wf: dict, pol: Policy, cur: dict, now: datetime) -> None:
@@ -35,17 +61,19 @@ def plan(db: sqlite3.Connection, gov: Governance, wf: dict, pol: Policy, cur: di
     active = [i for i, w in dist.items() if w > 0]
     if len(active) < 2:
         return
-    win = _window(db, wid, now)
+    cells = _cells(db, wid, now)
+    now_idx = (now.date() - D0).days * 24 + now.hour
     verdict: dict[str, str] = {}
     for i in active:
-        n, c = win.get(i, (0, 0))
-        rn, rc = sum(win.get(j, (0, 0))[0] for j in active if j != i), sum(win.get(j, (0, 0))[1] for j in active if j != i)
+        rest = set(active) - {i}
+        z, _, n, rn = stratified(cells, i, rest)
+        recent = {k: v for k, v in cells.items() if k[0] * 24 + k[1] > now_idx - RECENT_H}
+        ratio = stratified(recent, i, rest)[1]  # practical floor on the recent window: a 24h average dilutes a fresh collapse
         if n < MIN_DIALS or rn < MIN_DIALS:
             continue
-        z, rate, rrate = stats.two_prop_z(c, n, rc, rn), c / n, rc / rn
         fair = 1 / len(active)
         demoted = dist[i] < 0.5 * fair
-        if z < Z_BAD and rate < REL_BAD * rrate:
+        if z < Z_BAD and ratio < REL_BAD:
             verdict[i] = "bad"
         elif demoted and z > Z_OK:
             verdict[i] = "ok"
@@ -74,7 +102,8 @@ def plan(db: sqlite3.Connection, gov: Governance, wf: dict, pol: Policy, cur: di
                 target[s] = dist[s]
     new = _step(dist, target, pol if pol.auto_enabled and "caller_id" in pol.auto_dims else None)
     cfg.setdefault("allocations", {}).setdefault("default", {})["caller_id"] = {k: round(v, 4) for k, v in new.items() if v > 0}
-    verdict_txt = {i: win.get(i) for i in sorted(set(active) | set(spares))}
+    tot = {i: [sum(c.get(i, (0, 0))[k] for c in cells.values()) for k in (0, 1)] for i in sorted(set(active) | set(spares))}
+    verdict_txt = tot
     gov.propose(
         workflow=wid, kind=KIND, base_version=cur["version"], base_config=cur["config"], config=cfg,
         summary=f"Rotate calls away from caller ID {', '.join(sorted(bad or flagged))} (pickup collapsed vs siblings)",
