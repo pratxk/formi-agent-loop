@@ -21,6 +21,7 @@ log = logging.getLogger("controller.gov")
 
 OPERATIONAL = {"schedule", "caller_id"}  # dims we are willing to auto-apply even where policy allows more
 ACTIVE = ("QUEUED", "BATCHED", "SUBMITTING", "SUBMITTED", "APPROVED", "APPLYING")
+REJECT_COOLOFF_H = 6
 RESERVED_SLOTS = 1  # of max_requests_per_24h, kept for rollbacks / incident fixes
 
 
@@ -95,8 +96,15 @@ class Governance:
         if not dims:
             return None
         pid = hashlib.sha1(f"{workflow}|{base_version}|{kind}|{_j(config)}".encode()).hexdigest()[:16]
-        if self.db.execute("SELECT 1 FROM proposals WHERE proposal_id=?", (pid,)).fetchone():
-            return pid
+        prior = self.db.execute("SELECT state, decided_ts FROM proposals WHERE proposal_id=?", (pid,)).fetchone()
+        if prior:
+            if prior["state"] in ACTIVE + ("APPLIED", "BATCHED"):
+                return pid
+            if prior["state"] == "REJECTED" and prior["decided_ts"] and \
+                    now - datetime.fromisoformat(prior["decided_ts"]) < timedelta(hours=REJECT_COOLOFF_H):
+                return None  # do not hammer an approver with the same ask
+            n = self.db.execute("SELECT COUNT(*) FROM proposals WHERE proposal_id LIKE ?", (pid + "%",)).fetchone()[0]
+            pid = f"{pid}-r{n}"  # fresh id: an expired/rejected/stale ask is re-queued, never resubmitted as-is
         pol = self.pol[workflow]
         auto_ok = (not (dims - pol.auto_dims) and pol.auto_enabled and
                    cd.max_shift(base_config, config) <= pol.auto_shift * 0.95 and

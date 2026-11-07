@@ -9,6 +9,7 @@ import time
 from datetime import datetime
 
 from .api import Sim
+from . import planners
 from .governance import Governance, Policy, load_prefs
 from .ingest import Ingestor
 from .store import connect, meta_get, meta_set
@@ -36,10 +37,12 @@ def main() -> None:
     ing = Ingestor(db, sim)
     log.info("start: sim=%s cursor=%s", st["ts"], meta_get(db, "last_chunk", "-1"))
     ing.ingest_all()  # history + anything produced before a crash
-    policies = {w["workflow_id"]: Policy.of(w) for w in sim.get("/workflows")}
+    wfs = {w["workflow_id"]: w for w in sim.get("/workflows")}
+    policies = {k: Policy.of(w) for k, w in wfs.items()}
     gov = Governance(db, sim, policies, load_prefs())
     now = datetime.fromisoformat(st["ts"])
     gov.tick(now)  # reconcile anything in flight before the crash
+    planners.run(db, sim, gov, wfs, policies, now)
     while True:
         t0 = time.time()
         status, body = sim.call("POST", "/sim/advance", json={"minutes": TICK_MIN}, retry=False)
@@ -54,6 +57,7 @@ def main() -> None:
         t1 = time.time()
         n = ing.ingest_all()
         now = datetime.fromisoformat(body["ts"])
+        planners.run(db, sim, gov, wfs, policies, now)
         gov.tick(now)
         meta_set(db, "sim_minute", str(body["sim_minute"]))
         db.execute("INSERT INTO loop_metrics VALUES(?,?,?,?,?,?)",
