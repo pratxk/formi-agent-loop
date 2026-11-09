@@ -151,7 +151,8 @@ KPI, with interval). Dry runs are estimates and labelled as such.
 
 - Experiments are per cohort (not one cohort per workflow): voice effects differ by age band, so a pooled test hides them.
   Alpha became 0.10 *per workflow*, split across tests and looks; 0.05 per test would give ~3 false winners per workflow.
-- No welcome × voice interaction test (sample cost); marginal effects only. Disclosed in SUBMISSION §13.
+- Welcome × voice: marginal effects per dimension, plus a gate that checks the joint cell before promoting two winners in one cohort (`experiments.interaction`). Unit-tested only. Disclosed in SUBMISSION §13.
+- Schedule changes: `planners/schedverify.py` undoes hour weights only if up-weighted hours convert worse than down-weighted ones since the change (per cohort, stratified). A premise test because no holdout exists for a schedule. Unit-tested only.
 - Decay uses a pooled check over cohorts and only the last 3 days; per-cohort holdouts are too thin.
 - Governance learned two things from public_02: auto changes must wait while an approval is pending (version bump makes it
   stale), and a supervisor edit means *that dimension is owned by the human* afterwards.

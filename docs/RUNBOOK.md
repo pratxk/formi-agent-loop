@@ -8,14 +8,14 @@ advances the simulator, ingests new events into SQLite, lets four planners look 
 client send, track and apply the resulting proposals. It only knows what the simulator's HTTP API returns.
 
 ```
-ingest ──► SQLite ──► planners (calltime, callerid, incidents, experiments) ──► governance client ──► sim
+ingest ──► SQLite ──► planners (calltime, schedverify, callerid, incidents, experiments) ──► governance client ──► sim
 ```
 
 ## Run, test, inspect
 ```bash
 pip install -r requirements.txt
 ./run.sh http://127.0.0.1:8700                 # state in state/controller.db (override: CONTROLLER_DB=path)
-python -m pytest -q                            # 35 tests, ~2s, no simulator needed
+python -m pytest -q                            # 39 tests, ~2s, no simulator needed
 python -m controller.view                      # one screen: testing / needs you / changed / incident / loop health
 python -m controller.view --json | jq .        # same, machine readable
 python -m controller.view --weekly nw_         # change log with reasons (client summary)
@@ -62,6 +62,7 @@ rotation (informational), an experiment with no winner yet.
 | file | constant | meaning |
 |---|---|---|
 | `planners/calltime.py` | `MIN_SEG_DIALS=2000`, chi2 p<1e-6, `W_MIN=.25` | when an age band gets its own hour table; no hour ever gets weight 0 |
+| `planners/schedverify.py` | `Z_BAD=-3`, `MIN_DIALS_SIDE=400`, up/down weights 1.1/0.9 | when a schedule change is undone (premise reversed) |
 | `planners/callerid.py` | `Z_BAD=-3.5`, `REL_BAD=.8` (last 6h), `FLOOR=.05`, `SPARE_PROBE=.1` | when an ID is flagged; share kept on a demoted ID |
 | `planners/experiments.py` | `ALPHA=.10` per workflow, `LOOKS=6`, `MIN_N=300`, `MIN_LIFT=.02`, `CHAMPION_SHARE=.4`, `HOLDOUT_SHARE=.15`, `ROLLBACK_Z=-1` | the speed vs false-winner trade-off |
 | `planners/incidents.py` | `Z_BAD=3`, `RATIO_BAD=2`, `MIN_CUR_N=150`, `VALIDATE_N=200`, `CREDIT_RESERVE=20` | incident detection and credit spend |
@@ -87,5 +88,4 @@ rotation (informational), an experiment with no winner yet.
   any call that spends credits.
 
 ## Known limits (see SUBMISSION.md §13)
-Single process and single SQLite writer; lead map in RAM; schedule changes have no automatic rollback; no
-welcome × voice interaction test; decay rollback needs ~3 days of data at dev traffic.
+Single process and single SQLite writer; lead map in RAM; schedule rollback checks only the hour-order premise; welcome × voice gate unit-tested only; decay rollback needs ~3 days of data at dev traffic.
