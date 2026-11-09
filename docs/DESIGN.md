@@ -158,3 +158,5 @@ KPI, with interval). Dry runs are estimates and labelled as such.
 - Caller-ID comparison is stratified by (day, hour) cell; raw window totals blamed a healthy ID for having been used at bad hours.
 - Restart does not re-plan a simulated minute that was already planned (`planned_minute`); found by the crash-point script.
 - Incident verification judges only calls made after the fix and fails on engagement only when confident (one-sided 95%).
+- Decay evidence is pooled across promoted cohorts *and* cohorts where the variant is still a live challenger; a supervisor edit now
+  forgets only the touched dimensions (it used to wipe all experiment records and orphan live experiments, found on the seed-777 run).
