@@ -143,24 +143,35 @@ def decide(rows: list[tuple], st: dict, options: list[str], pol: Policy, cur_dis
 
 
 def pooled_decay(per_cohort: dict[str, tuple[dict, list[tuple]]], now_day: int) -> dict[str, dict]:
-    """Decay check pooled over every cohort where the same variant was promoted (a variant that stops working tends to
-    stop everywhere; pooling is what gives the 15% holdouts enough calls to see it). Looks at the last RECENT_DAYS only,
-    so early good days cannot mask a fade. Returns {cohort: evidence} for cohorts to roll back (empty = healthy)."""
-    groups: dict[tuple, list[tuple[str, dict]]] = {}
+    """Decay check pooled over every cohort that shows how a promoted variant is doing *right now*: the cohorts where
+    it was promoted (against their 15% holdout) AND the cohorts where it is still a live challenger against its
+    champion. A variant that fades tends to fade everywhere, and the witnesses are what give a single thin holdout
+    enough calls to see it. Only the last RECENT_DAYS are used, so early good days cannot mask a fade.
+    Returns {cohort: evidence} for *promoted* cohorts to roll back (empty = healthy)."""
+    groups: dict[tuple, list[tuple[str, dict, bool]]] = {}
     for c, (st, rows) in per_cohort.items():
-        if st.get("phase") != "promoted":
+        if st.get("phase") == "promoted":
+            pairs = [(st["winner"], st["baseline"], True)]
+        elif st.get("phase") == "explore":
+            pairs = [(o, st["champion"], False) for o, w in st.get("dist", {}).items() if o != st["champion"] and w > 0]
+        else:
             continue
-        cmp = compare(rows, st["winner"], st["baseline"], st.get("since_version", 0), max(0, now_day - RECENT_DAYS))
-        if cmp:
-            groups.setdefault((st["winner"], st["baseline"]), []).append((c, cmp))
+        for o, ref, promoted in pairs:
+            cmp = compare(rows, o, ref, st.get("since_version", 0), max(0, now_day - RECENT_DAYS))
+            if cmp:
+                groups.setdefault((o, ref), []).append((c, cmp, promoted))
     out: dict[str, dict] = {}
     for (w, base), items in groups.items():
-        n_hold = sum(c["n_b"] for _, c in items)
-        ws = [math.sqrt(min(c["n_a"], c["n_b"])) for _, c in items]
-        z = sum(wi * c["z"] for wi, (_, c) in zip(ws, items)) / math.sqrt(sum(wi * wi for wi in ws))
+        if not any(p for _, _, p in items):
+            continue
+        n_hold = sum(c["n_b"] for _, c, _ in items)
+        ws = [math.sqrt(min(c["n_a"], c["n_b"])) for _, c, _ in items]
+        z = sum(wi * c["z"] for wi, (_, c, _) in zip(ws, items)) / math.sqrt(sum(wi * wi for wi in ws))
         if n_hold >= MIN_HOLD_N and z < ROLLBACK_Z:
-            for c, cmp in items:
-                out[c] = {**cmp, "pooled_z": round(z, 2), "pooled_holdout_n": n_hold, "winner": w, "baseline": base}
+            for c, cmp, promoted in items:
+                if promoted:
+                    out[c] = {**cmp, "pooled_z": round(z, 2), "pooled_holdout_n": n_hold, "winner": w, "baseline": base,
+                              "cohorts_pooled": len(items)}
     return out
 
 
@@ -298,7 +309,9 @@ def _supervisor_edit(db: sqlite3.Connection, gov: Governance, wf: dict, cur: dic
     owned = set(json.loads((db.execute("SELECT value FROM meta WHERE key=?", (f"exp_owned:{wid}",)).fetchone() or ["[]"])[0]))
     db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",   # ownership: we never explore a dimension a human has set
                (f"exp_owned:{wid}", json.dumps(sorted(owned | (dims & {"welcome_message", "voice"})))))
-    db.execute("DELETE FROM meta WHERE key LIKE ?", (f"exp:{wid}:%",))
+    # forget only what the edit invalidates: the touched dimensions (all of them if cohorts changed)
+    for d in ({"welcome_message", "voice"} if "cohorts" in dims else dims):
+        db.execute("DELETE FROM meta WHERE key LIKE ?", (f"exp:{wid}:%:{d}",))
     db.execute("INSERT OR REPLACE INTO meta VALUES(?,?)",
                (f"exp_hold:{wid}", (now + timedelta(hours=SUPERVISOR_HOLD_H)).isoformat()))
     new_cfg, removed = copy.deepcopy(cfg), []

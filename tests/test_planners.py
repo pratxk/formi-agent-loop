@@ -194,3 +194,14 @@ def test_verify_tolerates_noise_but_catches_real_engagement_collapse():
 
     assert run(.47) == "resolved"   # 3pp lower on 400 calls is within noise
     assert run(.30) == "failed"     # a collapse is not
+
+
+def test_decay_seen_through_witness_cohorts_when_own_holdout_is_thin():
+    prom = {"phase": "promoted", "winner": "W2", "baseline": "W1", "since_version": 0}
+    expl = {"phase": "explore", "champion": "W1", "dist": {"W1": .4, "W2": .6}, "since_version": 0}
+    faded = _rows(.35, .30, n=60, days=(5, 6, 7))
+    per = {"a": (prom, _rows(.35, .34, n=8, days=(5, 6, 7))), **{c: (expl, faded) for c in "bcd"}}
+    assert set(ex.pooled_decay(per, now_day=7)) == {"a"}                      # only promoted cohorts are rolled back
+    healthy = _rows(.30, .40, n=60, days=(5, 6, 7))
+    per_ok = {"a": (prom, _rows(.30, .40, n=8, days=(5, 6, 7))), **{c: (expl, healthy) for c in "bcd"}}
+    assert ex.pooled_decay(per_ok, now_day=7) == {}
