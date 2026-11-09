@@ -1,0 +1,6 @@
+seed	all_conclusion	workflow_rows	changes	harmful
+11	+17.4%	ks_cancel=+49.6% nw_kyc=-0.0% nw_renewal=+2.2% 	14 applied — neutral: 4, beneficial: 10	harmful: 0
+22	+17.2%	ks_cancel=+55.2% nw_kyc=+0.2% nw_renewal=-0.8% 	15 applied — neutral: 7, beneficial: 8	harmful: 0
+33	+14.4%	ks_cancel=+47.0% nw_kyc=-0.5% nw_renewal=-1.7% 	12 applied — neutral: 4, beneficial: 8	harmful: 0
+44	+16.5%	ks_cancel=+47.0% nw_kyc=+3.4% nw_renewal=+0.6% 	14 applied — neutral: 5, beneficial: 9	harmful: 0
+55	+15.6%	ks_cancel=+49.9% nw_kyc=+0.4% nw_renewal=-1.4% 	17 applied — neutral: 5, beneficial: 11, harmful: 1	harmful: 1
