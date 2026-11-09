@@ -142,6 +142,22 @@ def decide(rows: list[tuple], st: dict, options: list[str], pol: Policy, cur_dis
     return None
 
 
+def interaction(cells: dict[tuple[str, str], tuple[int, int]], w: tuple[str, str], v: tuple[str, str]) -> dict:
+    """Welcome and voice are sampled independently, so every (welcome, voice) pair has live traffic. Before promoting
+    a welcome winner AND a voice winner in one cohort, check the pair that would actually run together:
+    cells[(welcome, voice)] = (connected, engaged); w = (winner, champion), v = (winner, champion).
+    Returns {'ok': bool|None, 'z': ..}: ok=False when the joint cell engages clearly worse than the better single
+    winner (they do not add up), None when the joint cell is too thin to say."""
+    (wn, wc), (vn, vc) = w, v
+    joint, w_only, v_only = cells.get((wn, vn), (0, 0)), cells.get((wn, vc), (0, 0)), cells.get((wc, vn), (0, 0))
+    best = max((w_only, v_only), key=lambda c: c[1] / c[0] if c[0] else 0)
+    if joint[0] < MIN_N or best[0] < MIN_N:
+        return {"ok": None, "joint_n": joint[0], "best_single_n": best[0]}
+    z = stats.two_prop_z(joint[1], joint[0], best[1], best[0])   # <0 when the joint cell is worse
+    return {"ok": z > -1.645, "z_joint_vs_best": round(z, 2), "joint": joint[1] / joint[0], "best_single": best[1] / best[0],
+            "joint_n": joint[0], "best_single_n": best[0]}
+
+
 def pooled_decay(per_cohort: dict[str, tuple[dict, list[tuple]]], now_day: int) -> dict[str, dict]:
     """Decay check pooled over every cohort that shows how a promoted variant is doing *right now*: the cohorts where
     it was promoted (against their 15% holdout) AND the cohorts where it is still a live challenger against its
@@ -251,6 +267,29 @@ def plan(db: sqlite3.Connection, gov: Governance, wf: dict, pol: Policy, cur: di
                 changes = [x for x in changes if not (x[0] == c and x[1] == dim)]
                 changes.append((c, dim, _key(wid, c, dim), st, d))
                 new_cfg.setdefault("allocations", {}).setdefault(c, {})[dim] = d["dist"]
+    for c in cohorts:   # welcome x voice: two winners in one cohort must also work together
+        pw = [x for x in changes if x[0] == c and x[1] == "welcome_message" and x[4]["phase"] == "promoted"]
+        pv = [x for x in changes if x[0] == c and x[1] == "voice" and x[4]["phase"] == "promoted"]
+        if not (pw and pv):
+            continue
+        dw, dv = pw[0][4], pv[0][4]
+        cells = {(a, b): (con, eng) for a, b, con, eng in db.execute(
+            "SELECT welcome, voice, SUM(connected), SUM(engaged) FROM call_agg WHERE workflow=? AND cohort=? AND version>=? "
+            "GROUP BY 1,2", (wid, c, max(_state(db, _key(wid, c, "welcome_message")).get("cur", {}).get("since_version", 0),
+                                         _state(db, _key(wid, c, "voice")).get("cur", {}).get("since_version", 0))))}
+        ix = interaction(cells, (dw["winner"], dw["baseline"]), (dv["winner"], dv["baseline"]))
+        if ix["ok"] is not True:   # clearly non-additive, or unproven: keep the stronger winner, the other stays in test
+            weaker = pw[0] if dw["evidence"]["lift"] < dv["evidence"]["lift"] else pv[0]
+            changes.remove(weaker)
+            orig = cfg.get("allocations", {}).get(c, {}).get(weaker[1])
+            if orig is None:
+                new_cfg["allocations"][c].pop(weaker[1], None)
+            else:
+                new_cfg["allocations"][c][weaker[1]] = copy.deepcopy(orig)
+            db.execute("INSERT INTO decisions(ts,workflow,kind,inputs,outcome) VALUES(?,?,?,?,?)",
+                       (now.isoformat(), wid, KIND, json.dumps({"cohort": c, "interaction": ix}),
+                        f"{weaker[1]} promotion held back in {c}: welcome and voice winners "
+                        + ("do not add up" if ix["ok"] is False else "not yet shown to work together")))
     if not changes:
         return
     rollback = any(d["kind"] == ROLLBACK for *_, d in changes)

@@ -1,12 +1,13 @@
 """Planner decisions on synthetic data: no simulator, no governance side effects."""
 import copy
+import json
 from datetime import datetime
 
 import pytest
 
 from controller import stats
 from controller.governance import Policy
-from controller.planners import callerid, calltime
+from controller.planners import callerid, calltime, experiments, schedverify
 from controller.store import connect
 
 WF = {"workflow_id": "w", "daily_batch": {"size": 1000}, "options": {"caller_id": ["D1", "D2", "D3"]}}
@@ -205,3 +206,40 @@ def test_decay_seen_through_witness_cohorts_when_own_holdout_is_thin():
     healthy = _rows(.30, .40, n=60, days=(5, 6, 7))
     per_ok = {"a": (prom, _rows(.30, .40, n=8, days=(5, 6, 7))), **{c: (expl, healthy) for c in "bcd"}}
     assert ex.pooled_decay(per_ok, now_day=7) == {}
+
+
+W_SCHED = {"default": {"10": 2.0, "11": 0.5}}
+
+
+def _sched_world(up_rate, down_rate, dials=1000):
+    db = connect(":memory:")
+    cfg = {**CFG, "schedule": {"hour_weights": W_SCHED, "lead_preferred_hour": {}}}
+    db.execute("INSERT INTO proposals(proposal_id,workflow,kind,state,config,applied_ts,applied_version) "
+               "VALUES('p','w','schedule_cohorts','APPLIED',?,'t',2)", (json.dumps(cfg),))
+    for hour, r in ((10, up_rate), (11, down_rate)):
+        db.execute("INSERT INTO call_agg VALUES('w',1,?,2,'default','hi','31-45','W1','V1','D1','P1',?,?,?,0)",
+                   (hour, dials, int(dials * r), int(dials * r)))
+    spy = Spy(db)
+    spy.active = lambda *a: []
+    schedverify.plan(db, spy, WF, POL, {"version": 2, "config": cfg}, datetime(2027, 1, 4, 0, 0))
+    return spy.calls
+
+
+def test_schedule_undone_when_upweighted_hours_convert_worse():
+    (p,) = _sched_world(0.10, 0.25)
+    assert p["kind"] == "schedule_rollback" and p["priority"] == 1
+    assert set(p["config"]["schedule"]["hour_weights"]["default"].values()) == {1.0}
+
+
+def test_schedule_kept_when_premise_holds_or_data_thin():
+    assert _sched_world(0.25, 0.10) == []
+    assert _sched_world(0.10, 0.25, dials=100) == []
+
+
+def test_welcome_voice_interaction_blocks_winners_that_do_not_add_up():
+    w, v = ("W2", "W1"), ("V2", "V1")
+    ok = {("W2", "V2"): (500, 300), ("W2", "V1"): (500, 270), ("W1", "V2"): (500, 265), ("W1", "V1"): (500, 250)}
+    bad = {**ok, ("W2", "V2"): (500, 220)}          # each helps alone, together they clash
+    assert experiments.interaction(ok, w, v)["ok"] is True
+    assert experiments.interaction(bad, w, v)["ok"] is False
+    assert experiments.interaction({("W2", "V2"): (40, 30), ("W2", "V1"): (500, 270), ("W1", "V2"): (500, 265)}, w, v)["ok"] is None
